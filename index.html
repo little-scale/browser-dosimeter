@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web dB SPL Meter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        #decibelDisplay {
+            font-size: 24px;
+            margin: 20px;
+        }
+        input {
+            width: 80px;
+        }
+        #alarm {
+            display: none;
+            color: red;
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        canvas {
+            width: 100%;
+            max-width: 600px;
+            height: 200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Web dB SPL Meter</h1>
+    <button id="startButton">Start Measuring</button>
+    <p id="decibelDisplay">Estimated dB SPL: -- dB</p>
+    <label for="offset">Calibration Offset (dB): </label>
+    <input type="number" id="offset" value="0" step="0.1">
+    <label for="threshold">Alarm Threshold (dB): </label>
+    <input type="number" id="threshold" value="80" step="1">
+    <p id="alarm">⚠ Noise Level Exceeded! ⚠</p>
+    <canvas id="dbChart"></canvas>
+    
+    <script>
+        let dbValues = [];
+        let timeLabels = [];
+
+        async function startDecibelMeter() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = audioContext.createAnalyser();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                const scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+
+                analyser.smoothingTimeConstant = 0.8;
+                analyser.fftSize = 512;
+
+                microphone.connect(analyser);
+                analyser.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                scriptProcessor.onaudioprocess = function () {
+                    let buffer = new Float32Array(analyser.fftSize);
+                    analyser.getFloatTimeDomainData(buffer);
+
+                    let sum = 0;
+                    for (let i = 0; i < buffer.length; i++) {
+                        sum += buffer[i] * buffer[i];
+                    }
+
+                    let rms = Math.sqrt(sum / buffer.length);
+                    let dB = 20 * Math.log10(rms) + 94;
+
+                    let offset = parseFloat(document.getElementById("offset").value) || 0;
+                    let calibratedDB = dB + offset;
+                    let threshold = parseFloat(document.getElementById("threshold").value) || 80;
+
+                    document.getElementById("decibelDisplay").innerText = `Estimated dB SPL: ${calibratedDB.toFixed(2)} dB`;
+                    document.getElementById("alarm").style.display = calibratedDB >= threshold ? "block" : "none";
+
+                    dbValues.push(calibratedDB);
+                    timeLabels.push(new Date().toLocaleTimeString());
+                    if (dbValues.length > 50) {
+                        dbValues.shift();
+                        timeLabels.shift();
+                    }
+                    updateChart();
+                };
+            } catch (err) {
+                console.error("Microphone access error:", err);
+                alert("Microphone access is required to measure dB SPL.");
+            }
+        }
+
+        let ctx = document.getElementById("dbChart").getContext("2d");
+        let chart = new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: timeLabels,
+                datasets: [{
+                    label: "dB SPL",
+                    data: dbValues,
+                    borderColor: "red",
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: "Time" } },
+                    y: { title: { display: true, text: "dB SPL" }, min: 30, max: 120 }
+                }
+            }
+        });
+
+        function updateChart() {
+            chart.data.labels = timeLabels;
+            chart.data.datasets[0].data = dbValues;
+            chart.update();
+        }
+
+        document.getElementById("startButton").addEventListener("click", startDecibelMeter);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</body>
+</html>
