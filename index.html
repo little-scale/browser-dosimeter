@@ -30,6 +30,7 @@
             height: 200px;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <h1>Web dB SPL Meter</h1>
@@ -45,53 +46,48 @@
     <script>
         let dbValues = [];
         let timeLabels = [];
+        let audioContext, analyser, microphone, dataArray;
 
         async function startDecibelMeter() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const analyser = audioContext.createAnalyser();
-                const microphone = audioContext.createMediaStreamSource(stream);
-                const scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
-
-                analyser.smoothingTimeConstant = 0.8;
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphone = audioContext.createMediaStreamSource(stream);
                 analyser.fftSize = 512;
-
+                dataArray = new Float32Array(analyser.fftSize);
                 microphone.connect(analyser);
-                analyser.connect(scriptProcessor);
-                scriptProcessor.connect(audioContext.destination);
-
-                scriptProcessor.onaudioprocess = function () {
-                    let buffer = new Float32Array(analyser.fftSize);
-                    analyser.getFloatTimeDomainData(buffer);
-
-                    let sum = 0;
-                    for (let i = 0; i < buffer.length; i++) {
-                        sum += buffer[i] * buffer[i];
-                    }
-
-                    let rms = Math.sqrt(sum / buffer.length);
-                    let dB = 20 * Math.log10(rms) + 94;
-
-                    let offset = parseFloat(document.getElementById("offset").value) || 0;
-                    let calibratedDB = dB + offset;
-                    let threshold = parseFloat(document.getElementById("threshold").value) || 80;
-
-                    document.getElementById("decibelDisplay").innerText = `Estimated dB SPL: ${calibratedDB.toFixed(2)} dB`;
-                    document.getElementById("alarm").style.display = calibratedDB >= threshold ? "block" : "none";
-
-                    dbValues.push(calibratedDB);
-                    timeLabels.push(new Date().toLocaleTimeString());
-                    if (dbValues.length > 50) {
-                        dbValues.shift();
-                        timeLabels.shift();
-                    }
-                    updateChart();
-                };
+                
+                setInterval(updateDecibel, 200);
             } catch (err) {
                 console.error("Microphone access error:", err);
                 alert("Microphone access is required to measure dB SPL.");
             }
+        }
+
+        function updateDecibel() {
+            analyser.getFloatTimeDomainData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i] * dataArray[i];
+            }
+
+            let rms = Math.sqrt(sum / dataArray.length);
+            let dB = rms > 0 ? 20 * Math.log10(rms) + 94 : -Infinity; // Avoid log10(0)
+            let offset = parseFloat(document.getElementById("offset").value) || 0;
+            let calibratedDB = dB + offset;
+            let threshold = parseFloat(document.getElementById("threshold").value) || 80;
+
+            document.getElementById("decibelDisplay").innerText = `Estimated dB SPL: ${calibratedDB.toFixed(2)} dB`;
+            document.getElementById("alarm").style.display = calibratedDB >= threshold ? "block" : "none";
+
+            dbValues.push(calibratedDB);
+            timeLabels.push(new Date().toLocaleTimeString());
+            if (dbValues.length > 50) {
+                dbValues.shift();
+                timeLabels.shift();
+            }
+            updateChart();
         }
 
         let ctx = document.getElementById("dbChart").getContext("2d");
@@ -124,6 +120,5 @@
 
         document.getElementById("startButton").addEventListener("click", startDecibelMeter);
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </body>
 </html>
